@@ -30,9 +30,6 @@ First, you need to install LeRobot separately by following their installation in
 ## Quick Start
 
 ```bash
-# Within the Lerobot Repository:
-cd lerobot
-
 # Clone this bridge repository
 git clone https://github.com/MuammerBay/so-arm101-ros2-bridge.git
 cd so-arm101-ros2-bridge
