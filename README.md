@@ -15,13 +15,34 @@ ROS2 workspace and Isaac Sim integration for SO-ARM101 robot hardware interface.
   - Ready-to-use USD stage with SO-ARM101 robot model
   - ROS2 action graph setup for real-time communication
 
+## Prerequisites
+
+### 1. Install LeRobot
+First, you need to install LeRobot separately:
+
+```bash
+# Clone LeRobot repository
+git clone https://github.com/huggingface/lerobot.git
+cd lerobot
+
+# Create and activate conda environment
+conda create -n lerobot python=3.10
+conda activate lerobot
+
+# Install LeRobot (follow their installation instructions)
+pip install -e .
+```
+
+### 2. Clone this bridge repository
+```bash
+# Clone this bridge (in a separate directory)
+git clone https://github.com/MuammerBay/so-arm101-ros2-bridge.git
+cd so-arm101-ros2-bridge
+```
+
 ## Quick Start
 
 ```bash
-# Clone the repository
-git clone https://github.com/MuammerBay/so-arm101-ros2-bridge.git
-cd so-arm101-ros2-bridge
-
 # Build ROS2 workspace
 colcon build --packages-select jointstatereader
 
@@ -37,6 +58,13 @@ python3 src/jointstatereader/jointstatereader/joint_state_reader.py
 - ROS2 Humble
 - SO-ARM101 robot hardware
 - Isaac Sim (for simulation integration)
+- [LeRobot](https://github.com/huggingface/lerobot) (installed separately)
+
+## Complete Tutorial
+
+For detailed step-by-step instructions including LeRobot setup, Isaac Sim configuration, and teleoperation, follow this comprehensive tutorial:
+
+**[SO-ARM101 x Isaac Sim x Isaac Lab Tutorial](https://lycheeai-hub.com/project-so-arm101-x-isaac-sim-x-isaac-lab-tutorial-series/so-arm-teleoperate-real-isaac-sim)**
 
 ## Usage with LeRobot
 
