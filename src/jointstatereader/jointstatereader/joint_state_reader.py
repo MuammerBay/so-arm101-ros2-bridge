@@ -3,10 +3,12 @@
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
+from geometry_msgs.msg import Twist
 import serial
 import time
 import struct
 import math
+import numpy as np
 
 class JointStateReader(Node):
     def __init__(self):
@@ -14,6 +16,9 @@ class JointStateReader(Node):
         
         # Publisher for SO100 robot joint states - Hardware Driver
         self.joint_pub = self.create_publisher(JointState, '/joint_states', 10)
+        
+        # NEW: Publisher for pose deltas (Twist) - IK Teleoperation
+        self.twist_pub = self.create_publisher(Twist, '/robot/cmd_pose', 10)
         
         # Joint names for SO100 robot (matching Isaac Lab convention)
         self.joint_names = [
@@ -24,6 +29,25 @@ class JointStateReader(Node):
             'Wrist_Roll',    # Wrist roll
             'Jaw'            # Gripper
         ]
+        
+        # NEW: SO-ARM101 DH parameters for forward kinematics
+        # These are approximate - adjust based on your robot's actual dimensions
+        self.dh_params = [
+            # [a, alpha, d, theta_offset] - standard DH parameters
+            [0.0, -math.pi/2, 0.0, 0.0],      # Base to shoulder
+            [0.0, math.pi/2, 0.0, 0.0],       # Shoulder to upper arm
+            [0.2, 0.0, 0.0, 0.0],             # Upper arm to forearm
+            [0.0, -math.pi/2, 0.0, 0.0],      # Forearm to wrist
+            [0.0, math.pi/2, 0.0, 0.0],       # Wrist to gripper
+        ]
+        
+        # NEW: Previous joint positions for delta calculation
+        self.prev_joint_positions = [0.0] * len(self.joint_names)
+        self.prev_ee_pose = None
+        
+        # NEW: Pose delta calculation parameters
+        self.pose_delta_scale = 0.1  # Scale factor for pose deltas
+        self.min_delta_threshold = 0.001  # Minimum change to publish
         
         # Connect to SO100 robot hardware
         self.serial_port = None
@@ -46,6 +70,7 @@ class JointStateReader(Node):
         
         self.get_logger().info("🚀 SO100 Hardware Driver started - publishing to /joint_states at 20Hz")
         self.get_logger().info("✅ Direct hardware interface - reads from physical robot")
+        self.get_logger().info("🔄 NEW: IK teleoperation support - publishing to /robot/cmd_pose")
         self.get_logger().info("Using official STS3215 protocol with proper error handling")
         
     def connect_to_robot(self):
@@ -129,8 +154,72 @@ class JointStateReader(Node):
         # Convert to radians (-π to π)
         return normalized * 3.14159
     
+    def dh_transform_matrix(self, a, alpha, d, theta):
+        """Compute DH transformation matrix"""
+        ct = math.cos(theta)
+        st = math.sin(theta)
+        ca = math.cos(alpha)
+        sa = math.sin(alpha)
+        
+        return np.array([
+            [ct, -st*ca, st*sa, a*ct],
+            [st, ct*ca, -ct*sa, a*st],
+            [0, sa, ca, d],
+            [0, 0, 0, 1]
+        ])
+    
+    def forward_kinematics(self, joint_positions):
+        """Compute end-effector pose from joint positions"""
+        # Use only first 5 joints (exclude gripper)
+        joints = joint_positions[:5]
+        
+        # Start with identity matrix
+        T = np.eye(4)
+        
+        # Apply DH transformations for each joint
+        for i, (joint_angle, dh_param) in enumerate(zip(joints, self.dh_params)):
+            a, alpha, d, theta_offset = dh_param
+            theta = joint_angle + theta_offset
+            T_i = self.dh_transform_matrix(a, alpha, d, theta)
+            T = T @ T_i
+        
+        # Extract position and orientation
+        position = T[:3, 3]
+        
+        # Convert rotation matrix to Euler angles (simplified)
+        # This is a simplified approach - for more accuracy, use proper quaternion conversion
+        rx = math.atan2(T[2, 1], T[2, 2])
+        ry = math.atan2(-T[2, 0], math.sqrt(T[2, 1]**2 + T[2, 2]**2))
+        rz = math.atan2(T[1, 0], T[0, 0])
+        
+        return position, [rx, ry, rz]
+    
+    def compute_pose_delta(self, current_joints, prev_joints):
+        """Compute pose delta from joint position changes"""
+        if prev_joints is None:
+            return None
+            
+        # Compute current and previous end-effector poses
+        current_pos, current_rot = self.forward_kinematics(current_joints)
+        prev_pos, prev_rot = self.forward_kinematics(prev_joints)
+        
+        # Compute position delta
+        pos_delta = current_pos - prev_pos
+        
+        # Compute rotation delta (simplified)
+        rot_delta = [current_rot[i] - prev_rot[i] for i in range(3)]
+        
+        # Normalize rotation deltas to [-π, π]
+        for i in range(3):
+            while rot_delta[i] > math.pi:
+                rot_delta[i] -= 2 * math.pi
+            while rot_delta[i] < -math.pi:
+                rot_delta[i] += 2 * math.pi
+        
+        return pos_delta, rot_delta
+    
     def read_and_publish(self):
-        """Read all joint positions and publish as JointState"""
+        """Read all joint positions and publish as JointState and Twist"""
         if not self.serial_port:
             # Try to reconnect
             self.connect_to_robot()
@@ -181,6 +270,33 @@ class JointStateReader(Node):
         # Publish joint states to ROS2 /joint_states topic
         self.joint_pub.publish(msg)
         
+        # NEW: Compute and publish pose deltas for IK teleoperation
+        if self.prev_joint_positions is not None:
+            pose_delta = self.compute_pose_delta(msg.position, self.prev_joint_positions)
+            
+            if pose_delta is not None:
+                pos_delta, rot_delta = pose_delta
+                
+                # Check if delta is significant enough to publish
+                pos_magnitude = np.linalg.norm(pos_delta)
+                rot_magnitude = np.linalg.norm(rot_delta)
+                
+                if pos_magnitude > self.min_delta_threshold or rot_magnitude > self.min_delta_threshold:
+                    # Create Twist message
+                    twist_msg = Twist()
+                    twist_msg.linear.x = pos_delta[0] * self.pose_delta_scale
+                    twist_msg.linear.y = pos_delta[1] * self.pose_delta_scale
+                    twist_msg.linear.z = pos_delta[2] * self.pose_delta_scale
+                    twist_msg.angular.x = rot_delta[0] * self.pose_delta_scale
+                    twist_msg.angular.y = rot_delta[1] * self.pose_delta_scale
+                    twist_msg.angular.z = rot_delta[2] * self.pose_delta_scale
+                    
+                    # Publish Twist for IK teleoperation
+                    self.twist_pub.publish(twist_msg)
+        
+        # Update previous joint positions for next iteration
+        self.prev_joint_positions = list(msg.position)
+        
         # Status logging every 5 seconds
         if self.total_reads % 100 == 0:  # Every 5 seconds at 20Hz
             pos_str = [f'{p:.3f}' for p in msg.position]
@@ -189,6 +305,7 @@ class JointStateReader(Node):
             
             self.get_logger().info(f"=== Status Report (Read #{self.total_reads}) ===")
             self.get_logger().info(f"📡 Publishing to /joint_states")
+            self.get_logger().info(f"🔄 Publishing to /robot/cmd_pose (IK teleop)")
             self.get_logger().info(f"Joint positions (rad): {pos_str}")
             self.get_logger().info(f"Raw servo ticks: {tick_str}")
             self.get_logger().info(f"Read errors per servo: {error_str}")
