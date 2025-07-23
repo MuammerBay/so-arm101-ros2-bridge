@@ -28,7 +28,7 @@ class SOARMTF2Broadcaster(Node):
             # 'gripper' excluded - end-effector handled separately
         ]
         
-        # Link names from the URDF (including gripper jaw link, excluding only gripper joint movement)
+        # Link names from the URDF (minimal set for gripper and end-effector control)
         self.link_names = [
             'base_link',
             'shoulder_link',
@@ -36,11 +36,10 @@ class SOARMTF2Broadcaster(Node):
             'lower_arm_link',
             'wrist_link',
             'gripper_link',
-            'gripper_frame_link',  # End-effector frame for motion planning
-            'moving_jaw_so101_v1_link'  # Gripper jaw link (static position, no joint movement)
+            'ee_control_frame'  # Virtual control frame for DiffIK
         ]
         
-        # Parent-child relationship between links and associated joint (gripper jaw included, gripper joint excluded)
+        # Parent-child relationship between links and associated joint (minimal set for gripper and EE)
         self.link_connections = [
             # [parent_link, child_link, joint_name, joint_index]
             ['world', 'base_link', None, -1],  # Fixed transform from world to base
@@ -49,9 +48,7 @@ class SOARMTF2Broadcaster(Node):
             ['upper_arm_link', 'lower_arm_link', 'elbow_flex', 2],
             ['lower_arm_link', 'wrist_link', 'wrist_flex', 3],
             ['wrist_link', 'gripper_link', 'wrist_roll', 4],
-            ['gripper_link', 'gripper_frame_link', None, -1],  # Static transform to end-effector frame
-            ['gripper_link', 'moving_jaw_so101_v1_link', None, -1]  # Static transform to gripper jaw (no joint movement)
-            # Note: gripper joint (opening/closing) excluded - handle separately if needed
+            ['gripper_link', 'ee_control_frame', None, -1]  # Virtual control frame for DiffIK
         ]
         
         # Connect to SO100 robot hardware
@@ -258,30 +255,16 @@ class SOARMTF2Broadcaster(Node):
                 transform.transform.rotation.z = static_quat_z * joint_quat_w + static_quat_w * joint_quat_z
 
         # Handle static transforms (no joint movement)
-        elif joint_name is None and parent_frame == 'gripper_link' and child_frame == 'gripper_frame_link':
-            # URDF: <origin xyz="-0.0079 -0.000218121 -0.0981274" rpy="0 3.14159 0"/>
-            transform.transform.translation.x = -0.0079
-            transform.transform.translation.y = -0.000218121
-            transform.transform.translation.z = -0.0981274
-            # Static rotation from rpy="0 3.14159 0" (180° around Y axis)
-            quat_w, quat_x, quat_y, quat_z = self.rpy_to_quaternion(0, 3.14159, 0)
-            transform.transform.rotation.w = quat_w
-            transform.transform.rotation.x = quat_x
-            transform.transform.rotation.y = quat_y
-            transform.transform.rotation.z = quat_z
-            
-        elif joint_name is None and parent_frame == 'gripper_link' and child_frame == 'moving_jaw_so101_v1_link':
-            # URDF: <origin xyz="0.0202 0.0188 -0.0234" rpy="1.5708 -5.24284e-08 -1.41553e-15"/>
-            # Static position (gripper jaw at closed/neutral position)
-            transform.transform.translation.x = 0.0202
-            transform.transform.translation.y = 0.0188
-            transform.transform.translation.z = -0.0234
-            # Static rotation from rpy
-            quat_w, quat_x, quat_y, quat_z = self.rpy_to_quaternion(1.5708, -5.24284e-08, -1.41553e-15)
-            transform.transform.rotation.w = quat_w
-            transform.transform.rotation.x = quat_x
-            transform.transform.rotation.y = quat_y
-            transform.transform.rotation.z = quat_z
+        elif joint_name is None and parent_frame == 'gripper_link' and child_frame == 'ee_control_frame':
+            # Virtual control frame matching DiffIK body_offset [0.025, 0.0, -0.1]
+            transform.transform.translation.x = 0.025
+            transform.transform.translation.y = 0.0
+            transform.transform.translation.z = -0.1
+            # No rotation - same orientation as gripper_link
+            transform.transform.rotation.w = 1.0
+            transform.transform.rotation.x = 0.0
+            transform.transform.rotation.y = 0.0
+            transform.transform.rotation.z = 0.0
         
         return transform
     
