@@ -256,8 +256,8 @@ class SOARMTF2Broadcaster(Node):
 
         # Handle static transforms (no joint movement)
         elif joint_name is None and parent_frame == 'gripper_link' and child_frame == 'ee_control_frame':
-            # Virtual control frame matching DiffIK body_offset [0.025, 0.0, -0.1]
-            transform.transform.translation.x = 0.025
+            # Virtual control frame matching DiffIK body_offset [0.015, 0.0, -0.1]
+            transform.transform.translation.x = 0.015
             transform.transform.translation.y = 0.0
             transform.transform.translation.z = -0.1
             # No rotation - same orientation as gripper_link
