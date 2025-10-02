@@ -35,7 +35,7 @@ git clone https://github.com/MuammerBay/so-arm101-ros2-bridge.git
 cd so-arm101-ros2-bridge
 
 # Build ROS2 workspace
-colcon build --packages-select join tstatereader
+colcon build --packages-select jointstatereader
 
 # Source workspace
 source install/setup.bash
